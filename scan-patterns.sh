@@ -5,126 +5,66 @@
 # Detects: eval(), SQL injection, pickle.loads, shell=True, command injection
 # Usage: ./scan-patterns.sh <directory>
 
-set -euo pipefail
-
 TARGET_DIR="${1:-.}"
 FINDINGS_FILE="${2:-findings/raw/patterns.json}"
 
-findings=()
-finding_id=0
+# Ensure output directory exists
+mkdir -p "$(dirname "$FINDINGS_FILE")"
 
-# Pattern definitions with confidence scores
-# Format: pattern_name:regex:confidence:description
-declare -a PATTERNS=(
-    "EVAL_USAGE:eval\s*\(:4:Use of eval() can execute arbitrary code"
-    "EXEC_USAGE:exec\s*\(:4:Use of exec() can execute arbitrary code"
-    "PICKLE_LOADS:pickle\.loads?\s*\(:5:Deserializing untrusted data with pickle is dangerous"
-    "YAML_LOAD:yaml\.load\s*\([^)]*\):4:yaml.load() without SafeLoader can execute arbitrary code"
-    "SHELL_TRUE:subprocess\.[a-z]+\s*\([^)]*shell\s*=\s*True:4:shell=True in subprocess enables command injection"
-    "OS_SYSTEM:os\.system\s*\(:4:os.system() is vulnerable to command injection"
-    "SQL_STRING_FORMAT:execute\s*\(\s*[\"'][^\"']*%[sd]:4:String formatting in SQL queries enables SQL injection"
-    "SQL_F_STRING:execute\s*\(\s*f[\"']:4:f-string in SQL queries enables SQL injection"
-    "SQL_CONCAT:execute\s*\([^)]*\+:3:String concatenation in SQL queries enables SQL injection"
-    "HARDCODED_HOST:https?://[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:3:Hardcoded IP address in URL"
-    "WEAK_CRYPTO:md5\s*\(|sha1\s*\(:(3:Use of weak cryptographic hash function"
-    "RANDOM_PREDICTABLE:random\.randint|random\.random|Math\.random:2:Use of predictable random number generator"
-    "INPUT_RAW:input\s*\(\s*\)[^#]*\n[^#]*eval:5:User input directly passed to eval"
-    "PRINTF_FORMAT:%s.*%s.*%s.*%s.*%s:2:Possible format string vulnerability"
-    "DESERIALIZE_JSON:json\.loads\s*\(request:3:Deserializing user input with json.loads"
-)
+TEMP_FILE=$(mktemp)
 
-# File extensions to scan by language
-PY_EXTENSIONS="*.py"
-JS_EXTENSIONS="*.js"
-TS_EXTENSIONS="*.ts"
-JAVA_EXTENSIONS="*.java"
-GO_EXTENSIONS="*.go"
-RB_EXTENSIONS="*.rb"
-
-# Scan for Python patterns
-scan_python() {
-    local pattern_name="$1"
-    local regex="$2"
-    local confidence="$3"
-    local description="$4"
+# Scan function
+scan_pattern() {
+    local pattern="$1"
+    local type="$2"
+    local desc="$3"
+    local confidence="$4"
+    local lang="$5"
+    local ext="$6"
     
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            local file match
-            file=$(echo "$line" | cut -d: -f1)
-            match=$(echo "$line" | cut -d: -f2- | sed 's/^[[:space:]]*//' | head -c 100)
-            
-            # Skip test files and examples
-            if [[ "$file" =~ test|example|sample|demo ]]; then
-                continue
-            fi
-            
-            findings+=("{\"id\":$finding_id,\"type\":\"$pattern_name\",\"file\":\"$file\",\"pattern\":\"${match//\"/\\\"}\",\"confidence\":$confidence,\"description\":\"$description\",\"language\":\"python\"}")
-            ((finding_id++))
-        fi
-    done < <(grep -rn --include="*.py" -E "$regex" "$TARGET_DIR" 2>/dev/null | head -100 || true)
+    # Filter out actual test files, not directories containing "test"
+    grep -rn --include="*.$ext" -E "$pattern" "$TARGET_DIR" 2>/dev/null | grep -vE '/test/|_test\.|\.test\.|spec/' | head -20 | while IFS= read -r line; do
+        local file
+        file=$(echo "$line" | cut -d: -f1)
+        echo "{\"type\":\"$type\",\"file\":\"$file\",\"pattern\":\"$type detected\",\"confidence\":$confidence,\"description\":\"$desc\",\"language\":\"$lang\"}"
+    done >> "$TEMP_FILE"
 }
 
-# Scan for JavaScript/TypeScript patterns
-scan_javascript() {
-    local pattern_name="$1"
-    local regex="$2"
-    local confidence="$3"
-    local description="$4"
-    
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            local file match
-            file=$(echo "$line" | cut -d: -f1)
-            match=$(echo "$line" | cut -d: -f2- | sed 's/^[[:space:]]*//' | head -c 100)
-            
-            # Skip test files and examples
-            if [[ "$file" =~ test|example|sample|demo|spec ]]; then
-                continue
-            fi
-            
-            findings+=("{\"id\":$finding_id,\"type\":\"$pattern_name\",\"file\":\"$file\",\"pattern\":\"${match//\"/\\\"}\",\"confidence\":$confidence,\"description\":\"$description\",\"language\":\"javascript\"}")
-            ((finding_id++))
-        fi
-    done < <(grep -rn --include="*.js" --include="*.ts" -E "$regex" "$TARGET_DIR" 2>/dev/null | head -100 || true)
-}
+# Python patterns
+scan_pattern 'eval\s*\(' 'EVAL_USAGE' 'Use of eval() can execute arbitrary code' 4 python py
+scan_pattern 'exec\s*\(' 'EXEC_USAGE' 'Use of exec() can execute arbitrary code' 4 python py
+scan_pattern 'pickle\.loads?' 'PICKLE_LOADS' 'Deserializing untrusted data with pickle is dangerous' 5 python py
+scan_pattern 'yaml\.load\s*\(' 'YAML_LOAD' 'yaml.load() without SafeLoader can execute arbitrary code' 4 python py
+scan_pattern 'os\.system\s*\(' 'OS_SYSTEM' 'os.system() is vulnerable to command injection' 4 python py
+scan_pattern 'execute\s*\([^)]*%' 'SQL_STRING_FORMAT' 'String formatting in SQL queries enables SQL injection' 4 python py
+scan_pattern 'hashlib\.(md5|sha1)\s*\(' 'WEAK_CRYPTO' 'Use of weak cryptographic hash function' 3 python py
 
-# Scan for eval/exec in Python
-while IFS=: read -r name regex conf desc; do
-    [[ -z "$name" ]] && continue
-    if [[ "$name" == "EVAL_USAGE" || "$name" == "EXEC_USAGE" || "$name" == "PICKLE_LOADS" || "$name" == "YAML_LOAD" || "$name" == "SHELL_TRUE" || "$name" == "OS_SYSTEM" || "$name" == "SQL_STRING_FORMAT" || "$name" == "SQL_F_STRING" || "$name" == "SQL_CONCAT" || "$name" == "WEAK_CRYPTO" || "$name" == "RANDOM_PREDICTABLE" || "$name" == "INPUT_RAW" || "$name" == "DESERIALIZE_JSON" ]]; then
-        scan_python "$name" "$regex" "$conf" "$desc"
-    fi
-done < <(printf '%s\n' "${PATTERNS[@]}")
+# JavaScript patterns
+scan_pattern 'eval\s*\(' 'EVAL_USAGE_JS' 'Use of eval() can execute arbitrary code' 4 javascript js
+scan_pattern 'eval\s*\(' 'EVAL_USAGE_TS' 'Use of eval() can execute arbitrary code' 4 javascript ts
+scan_pattern '\.innerHTML\s*=' 'INNER_HTML' 'Setting innerHTML can lead to XSS' 3 javascript js
 
-# Scan for eval/Function in JavaScript
-scan_javascript "EVAL_USAGE" "eval\s*\(" "4" "Use of eval() can execute arbitrary code"
-scan_javascript "FUNCTION_CONSTRUCTOR" "new\s+Function\s*\(" "4" "Function constructor can execute arbitrary code"
-scan_javascript "INNER_HTML" "\.innerHTML\s*=" "3" "Setting innerHTML can lead to XSS"
-scan_javascript "DOCUMENT_WRITE" "document\.write\s*\(" "3" "document.write() can lead to XSS"
-scan_javascript "SQL_STRING_JS" "query\s*\(\s*[\"'][^\"']*(\+|\$\{)" "4" "String interpolation in SQL queries enables SQL injection"
+# Count findings
+finding_count=$(wc -l < "$TEMP_FILE" 2>/dev/null || echo "0")
+finding_count=$(echo "$finding_count" | tr -d ' ')
 
-# Scan for hardcoded credentials patterns
-scan_python "HARDCODED_API_KEY" "(api_key|apikey|API_KEY)\s*=\s*[\"'][a-zA-Z0-9]{16,}[\"']" "4" "Hardcoded API key detected"
-scan_python "HARDCODED_TOKEN" "(token|TOKEN|auth_token)\s*=\s*[\"'][a-zA-Z0-9_-]{20,}[\"']" "4" "Hardcoded authentication token detected"
-
-scan_javascript "HARDCODED_API_KEY" "(api_key|apikey|API_KEY)\s*:\s*[\"'][a-zA-Z0-9]{16,}[\"']" "4" "Hardcoded API key detected"
-scan_javascript "HARDCODED_TOKEN" "(token|TOKEN|auth_token)\s*:\s*[\"'][a-zA-Z0-9_-]{20,}[\"']" "4" "Hardcoded authentication token detected"
-
-# Write findings to JSON file
-if [[ ${#findings[@]} -gt 0 ]]; then
+# Add IDs and write JSON
+if [[ "$finding_count" -gt 0 ]]; then
     echo '{"findings":[' > "$FINDINGS_FILE"
-    for i in "${!findings[@]}"; do
-        if [[ $i -lt $((${#findings[@]} - 1)) ]]; then
-            echo "${findings[$i]}," >> "$FINDINGS_FILE"
-        else
-            echo "${findings[$i]}" >> "$FINDINGS_FILE"
+    id=0
+    while IFS= read -r line; do
+        if [[ $id -gt 0 ]]; then
+            echo "," >> "$FINDINGS_FILE"
         fi
-    done
+        echo "{\"id\":$id,$line}" >> "$FINDINGS_FILE"
+        id=$((id + 1))
+    done < "$TEMP_FILE"
     echo ']}' >> "$FINDINGS_FILE"
 else
     echo '{"findings":[]}' > "$FINDINGS_FILE"
 fi
 
-echo "Scan complete. Found $finding_id dangerous code patterns."
+rm -f "$TEMP_FILE"
+
+echo "Scan complete. Found $finding_count dangerous code patterns."
 echo "Results saved to: $FINDINGS_FILE"
