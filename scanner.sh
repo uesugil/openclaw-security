@@ -281,7 +281,9 @@ main() {
             ;;
             
         SCANNING)
-            local clone_dir="$SCRIPT_DIR/work/$repo_name"
+            # Sanitize repo name to match clone directory
+            local safe_repo_name="${repo_name//\//_}"
+            local clone_dir="$SCRIPT_DIR/work/$safe_repo_name"
             if [[ -d "$clone_dir" ]]; then
                 run_scanners "$clone_dir" "$repo_name"
                 # Clean up clone
