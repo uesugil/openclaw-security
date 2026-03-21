@@ -19,7 +19,7 @@ mkdir -p "$RAW_DIR" "$REVIEWED_DIR"
 
 # Configuration
 MAX_CLONE_SIZE_MB=200
-CONFIDENCE_THRESHOLD=4
+CONFIDENCE_THRESHOLD=3  # Lower threshold for training phase (heartbeats 9-40)
 DAILY_ISSUE_LIMIT=3
 WEEKLY_OWNER_LIMIT=1
 
