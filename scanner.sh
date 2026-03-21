@@ -5,7 +5,7 @@
 # States: IDLE → SELECTING → CLONING → SCANNING → REVIEWING → REPORTING → IDLE
 # Usage: ./scanner.sh
 
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="$SCRIPT_DIR/state.json"
@@ -43,32 +43,23 @@ log() {
     echo "[$(date -Iseconds)] $*" >> "$LOG_FILE"
 }
 
-# Select a target repository using gh CLI
+# Select a target repository using GitHub API
 select_repo() {
     log "Selecting target repository..."
     
-    # Search for popular repositories with recent activity
-    # Avoiding very large repos and focusing on active projects
-    local repos
-    repos=$(gh search repos \
-        --language=python \
-        --stars=">100" \
-        --sort=updated \
-        --order=desc \
-        --limit=20 \
-        --json nameWithOwner,size \
-        --jq '.[] | select(.size < 50000) | .nameWithOwner' 2>/dev/null | shuf | head -1)
+    # Search for repositories using GitHub API
+    local response repos
+    response=$(curl -s -H "Authorization: token ${GH_TOKEN:-}" \
+        "https://api.github.com/search/repositories?q=language:python+stars:>50&sort=updated&order=desc&per_page=20")
+    
+    # Extract a random repo from the results (handle JSON spacing)
+    repos=$(echo "$response" | grep '"full_name"' | head -5 | sed 's/.*"full_name": *"\([^"]*\)".*/\1/' | shuf | head -1)
     
     if [[ -z "$repos" ]]; then
         # Fallback to JavaScript repos
-        repos=$(gh search repos \
-            --language=javascript \
-            --stars=">100" \
-            --sort=updated \
-            --order=desc \
-            --limit=20 \
-            --json nameWithOwner,size \
-            --jq '.[] | select(.size < 50000) | .nameWithOwner' 2>/dev/null | shuf | head -1)
+        response=$(curl -s -H "Authorization: token ${GH_TOKEN:-}" \
+            "https://api.github.com/search/repositories?q=language:javascript+stars:>50&sort=updated&order=desc&per_page=20")
+        repos=$(echo "$response" | grep '"full_name"' | head -5 | sed 's/.*"full_name": *"\([^"]*\)".*/\1/' | shuf | head -1)
     fi
     
     if [[ -z "$repos" ]]; then
@@ -76,22 +67,26 @@ select_repo() {
         return 1
     fi
     
+    log "Selected repository: $repos"
     echo "$repos"
 }
 
 # Clone repository (shallow clone)
 clone_repo() {
     local repo="$1"
-    local clone_dir="$SCRIPT_DIR/work/$repo"
+    # Sanitize repo name for directory (replace / with _)
+    local safe_repo_name="${repo//\//_}"
+    local clone_dir="$SCRIPT_DIR/work/$safe_repo_name"
     
     log "Cloning $repo..."
     
     # Create clone directory
-    mkdir -p "$(dirname "$clone_dir")"
+    mkdir -p "$clone_dir"
     
     # Shallow clone
     if ! git clone --depth 1 "https://github.com/$repo.git" "$clone_dir" 2>/dev/null; then
         log "ERROR: Failed to clone $repo"
+        rm -rf "$clone_dir"
         return 1
     fi
     
@@ -114,17 +109,19 @@ run_scanners() {
     local repo_name="$2"
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
+    # Sanitize repo name (replace / with _)
+    local safe_repo_name="${repo_name//\//_}"
     
     log "Running security scanners on $repo_name..."
     
     # Run secret scanner
-    "$SCRIPT_DIR/scan-secrets.sh" "$repo_dir" "$RAW_DIR/secrets_${repo_name}_${timestamp}.json" || true
+    "$SCRIPT_DIR/scan-secrets.sh" "$repo_dir" "$RAW_DIR/secrets_${safe_repo_name}_${timestamp}.json" || true
     
     # Run dependency scanner
-    "$SCRIPT_DIR/scan-deps.sh" "$repo_dir" "$RAW_DIR/deps_${repo_name}_${timestamp}.json" || true
+    "$SCRIPT_DIR/scan-deps.sh" "$repo_dir" "$RAW_DIR/deps_${safe_repo_name}_${timestamp}.json" || true
     
     # Run pattern scanner
-    "$SCRIPT_DIR/scan-patterns.sh" "$repo_dir" "$RAW_DIR/patterns_${repo_name}_${timestamp}.json" || true
+    "$SCRIPT_DIR/scan-patterns.sh" "$repo_dir" "$RAW_DIR/patterns_${safe_repo_name}_${timestamp}.json" || true
     
     log "Scanners completed"
 }
@@ -134,7 +131,9 @@ review_findings() {
     local repo_name="$1"
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
-    local reviewed_file="$REVIEWED_DIR/reviewed_${repo_name}_${timestamp}.json"
+    # Sanitize repo name (replace / with _)
+    local safe_repo_name="${repo_name//\//_}"
+    local reviewed_file="$REVIEWED_DIR/reviewed_${safe_repo_name}_${timestamp}.json"
     
     log "Reviewing findings for $repo_name..."
     
