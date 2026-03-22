@@ -1,63 +1,51 @@
 #!/bin/bash
 # scan-secrets.sh - Detect hardcoded secrets in source code
-# Part of openclaw-security: GitHub public code security scanner
-# 
-# Detects: AWS keys, GitHub tokens, passwords, private keys, API keys
-# Usage: ./scan-secrets.sh <directory>
-
 TARGET_DIR="${1:-.}"
 FINDINGS_FILE="${2:-findings/raw/secrets.json}"
-
-# Ensure output directory exists
 mkdir -p "$(dirname "$FINDINGS_FILE")"
 
-# Temp file for findings
 TEMP_FILE=$(mktemp)
-finding_id=0
 
-# AWS Access Key ID (starts with AKIA)
-grep -rn --include="*.py" --include="*.js" --include="*.ts" --include="*.java" --include="*.go" --include="*.rb" --include="*.env" -E 'AKIA[0-9A-Z]{16}' "$TARGET_DIR" 2>/dev/null | while IFS= read -r line; do
-    file=$(echo "$line" | cut -d: -f1)
-    match=$(echo "$line" | grep -oE 'AKIA[0-9A-Z]{16}' || echo "AKIA****")
-    echo "{\"id\":$finding_id,\"type\":\"AWS_KEY\",\"file\":\"$file\",\"match\":\"${match:0:4}****\",\"confidence\":5}" >> "$TEMP_FILE"
-    finding_id=$((finding_id + 1))
-done
+# All patterns in one grep pass, output file:line:match format
+grep -rn \
+  --include="*.py" --include="*.js" --include="*.ts" --include="*.java" \
+  --include="*.go" --include="*.rb" --include="*.env" --include="*.yml" \
+  --include="*.yaml" --include="*.json" --include="*.toml" --include="*.cfg" \
+  -E "AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|ghs_[a-zA-Z0-9]{36}|sk-[a-zA-Z0-9]{20,}|-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----|AIza[0-9A-Za-z_-]{35}" \
+  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test/|/tests/|/__tests__/|_test\.|/spec/|/mock/|/fixture/|/example/|/sample/" > "$TEMP_FILE" || true
 
-# GitHub Personal Access Token
-grep -rn --include="*.py" --include="*.js" --include="*.ts" --include="*.java" --include="*.go" --include="*.rb" --include="*.env" -E 'ghp_[a-zA-Z0-9]{36}' "$TARGET_DIR" 2>/dev/null | while IFS= read -r line; do
-    file=$(echo "$line" | cut -d: -f1)
-    echo "{\"id\":$finding_id,\"type\":\"GITHUB_TOKEN\",\"file\":\"$file\",\"match\":\"ghp_****\",\"confidence\":5}" >> "$TEMP_FILE"
-    finding_id=$((finding_id + 1))
-done
+# Also catch password assignments separately (different pattern)
+grep -rn \
+  --include="*.py" --include="*.js" --include="*.ts" --include="*.java" \
+  --include="*.go" --include="*.rb" --include="*.env" \
+  -iE "(password|passwd|secret_key|api_key|api_secret|access_token)\s*[:=]\s*[\"'][^\"']{6,}[\"']" \
+  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test|/spec|/mock|example|fixture|sample|README" >> "$TEMP_FILE" || true
 
-# Password patterns
-grep -rn --include="*.py" --include="*.js" --include="*.ts" --include="*.java" --include="*.go" --include="*.rb" --include="*.env" -iE '(password|passwd|pwd|secret_key|api_key)\s*=\s*["\047][^"\047]{4,}["\047]' "$TARGET_DIR" 2>/dev/null | while IFS= read -r line; do
-    file=$(echo "$line" | cut -d: -f1)
-    echo "{\"id\":$finding_id,\"type\":\"HARDCODED_PASSWORD\",\"file\":\"$file\",\"match\":\"[REDACTED]\",\"confidence\":4}" >> "$TEMP_FILE"
-    finding_id=$((finding_id + 1))
-done
+finding_count=$(wc -l < "$TEMP_FILE" | tr -d " ")
 
-# Private key header
-grep -rn --include="*.pem" --include="*.key" --include="*.txt" --include="*.env" -E '-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----' "$TARGET_DIR" 2>/dev/null | while IFS= read -r line; do
-    file=$(echo "$line" | cut -d: -f1)
-    echo "{\"id\":$finding_id,\"type\":\"PRIVATE_KEY\",\"file\":\"$file\",\"match\":\"[REDACTED]\",\"confidence\":5}" >> "$TEMP_FILE"
-    finding_id=$((finding_id + 1))
-done
-
-# Count findings
-finding_count=$(wc -l < "$TEMP_FILE" 2>/dev/null || echo "0")
-
-# Write JSON output
 if [[ "$finding_count" -gt 0 ]]; then
-    echo '{"findings":[' > "$FINDINGS_FILE"
-    # Add commas between entries
-    sed '$!s/$/,/' "$TEMP_FILE" >> "$FINDINGS_FILE"
-    echo ']}' >> "$FINDINGS_FILE"
+  echo "{\"findings\":[" > "$FINDINGS_FILE"
+  id=0
+  while IFS= read -r line; do
+    file=$(echo "$line" | cut -d: -f1)
+    lineno=$(echo "$line" | cut -d: -f2)
+    # Detect type
+    type="SECRET"
+    if echo "$line" | grep -qE "AKIA"; then type="AWS_KEY"; fi
+    if echo "$line" | grep -qE "ghp_|gho_|ghs_"; then type="GITHUB_TOKEN"; fi
+    if echo "$line" | grep -qE "sk-"; then type="OPENAI_KEY"; fi
+    if echo "$line" | grep -qiE "password|passwd|secret_key|api_key"; then type="HARDCODED_PASSWORD"; fi
+    if echo "$line" | grep -qE "PRIVATE KEY"; then type="PRIVATE_KEY"; fi
+    if echo "$line" | grep -qE "AIza"; then type="GOOGLE_API_KEY"; fi
+    
+    [[ $id -gt 0 ]] && echo "," >> "$FINDINGS_FILE"
+    echo "{\"id\":$id,\"type\":\"$type\",\"file\":\"$file\",\"line\":$lineno,\"confidence\":5}" >> "$FINDINGS_FILE"
+    id=$((id + 1))
+  done < "$TEMP_FILE"
+  echo "]}" >> "$FINDINGS_FILE"
 else
-    echo '{"findings":[]}' > "$FINDINGS_FILE"
+  echo "{\"findings\":[]}" > "$FINDINGS_FILE"
 fi
 
 rm -f "$TEMP_FILE"
-
-echo "Scan complete. Found $finding_count potential secrets."
-echo "Results saved to: $FINDINGS_FILE"
+echo "Found $finding_count secrets."

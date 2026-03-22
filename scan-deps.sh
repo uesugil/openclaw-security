@@ -39,7 +39,9 @@ setuptools:65.5.1:CVE-2022-40897:HIGH"
 # Simple version comparison (returns 0 if v1 < v2)
 version_lt() {
     local v1="$1" v2="$2"
-    [[ "$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | head -n1)" == "$v1" ]]
+    [[ "$v1" != "$v2" ]] && [[ "$(printf '%s
+%s
+' "$v1" "$v2" | sort -V | head -n1)" == "$v1" ]]
 }
 
 # Scan package.json

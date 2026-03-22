@@ -1,0 +1,51 @@
+{
+  "scan_date": "2026-03-22",
+  "repo": "example/sample-project",
+  "findings": [
+    {
+      "id": 1,
+      "type": "VULNERABLE_DEP",
+      "package": "lodash",
+      "version": "4.17.20",
+      "affected": "<4.17.21",
+      "cve": "CVE-2021-23337",
+      "severity": "HIGH",
+      "file": "package.json",
+      "confidence": 5,
+      "recommendation": "Update lodash to version 4.17.21 or later"
+    },
+    {
+      "id": 2,
+      "type": "DANGEROUS_PATTERN",
+      "pattern": "eval()",
+      "file": "src/utils.js",
+      "line": 42,
+      "code": "const result = eval(userInput);",
+      "confidence": 4,
+      "recommendation": "Replace eval() with safer alternatives like Function() or a parser"
+    },
+    {
+      "id": 3,
+      "type": "HARDCODED_SECRET",
+      "secret_type": "AWS_ACCESS_KEY",
+      "file": "config/aws.js",
+      "line": 15,
+      "match": "AKIA****",
+      "confidence": 5,
+      "recommendation": "Move AWS credentials to environment variables or AWS Secrets Manager"
+    }
+  ],
+  "summary": {
+    "total_findings": 3,
+    "by_severity": {
+      "critical": 0,
+      "high": 2,
+      "medium": 1
+    },
+    "by_type": {
+      "secrets": 1,
+      "dependencies": 1,
+      "patterns": 1
+    }
+  }
+}
