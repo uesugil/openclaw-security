@@ -19,7 +19,7 @@ grep -rn \
   --include="*.py" --include="*.js" --include="*.ts" --include="*.java" \
   --include="*.go" --include="*.rb" --include="*.env" \
   -iE "(password|passwd|secret_key|api_key|api_secret|access_token)\s*[:=]\s*[\"'][^\"']{6,}[\"']" \
-  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test/|/tests/|/__tests__/|_test\.|/spec/|/mock/|/fixture/|/example/|/sample/|README" >> "$TEMP_FILE" || true
+  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test/|/tests/|/__tests__/|_test\.|/spec/|/mock/|/fixture/|/example/|/sample/|README|conf_sample|\.sample\.|_sample\." >> "$TEMP_FILE" || true
 
 finding_count=$(wc -l < "$TEMP_FILE" | tr -d " ")
 
