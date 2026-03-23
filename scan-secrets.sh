@@ -12,14 +12,14 @@ grep -rn \
   --include="*.go" --include="*.rb" --include="*.env" --include="*.yml" \
   --include="*.yaml" --include="*.json" --include="*.toml" --include="*.cfg" \
   -E "AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|ghs_[a-zA-Z0-9]{36}|sk-[a-zA-Z0-9]{20,}|-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----|AIza[0-9A-Za-z_-]{35}" \
-  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test/|/tests/|/__tests__/|_test\.|\.test\.|/spec/|/mock/|/fixture/|/example/|/sample/" > "$TEMP_FILE" || true
+  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test/|/tests/|/__tests__/|/_test/|/test_/|_test\.|\.test\.|/spec/|/mock/|/mocks/|/fixture/|/fixtures/|/example/|/examples/|/sample/|/samples/|/demo/|/demos/|\.spec\.|_spec\." > "$TEMP_FILE" || true
 
 # Also catch password assignments separately (different pattern)
 grep -rn \
   --include="*.py" --include="*.js" --include="*.ts" --include="*.java" \
   --include="*.go" --include="*.rb" --include="*.env" \
   -iE "(password|passwd|secret_key|api_key|api_secret|access_token)\s*[:=]\s*[\"'][^\"']{6,}[\"']" \
-  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test/|/tests/|/__tests__/|_test\.|\.test\.|/spec/|/mock/|/fixture/|/example/|/sample/|README|conf_sample|\.sample\.|_sample\." >> "$TEMP_FILE" || true
+  "$TARGET_DIR" 2>/dev/null | grep -vE "/node_modules/|/\.git/|/vendor/|/dist/|/test/|/tests/|/__tests__/|/_test/|/test_/|_test\.|\.test\.|/spec/|/mock/|/mocks/|/fixture/|/fixtures/|/example/|/examples/|/sample/|/samples/|/demo/|/demos/|README|\.md$|conf_sample|\.sample\.|_sample\.|\.spec\.|_spec\." >> "$TEMP_FILE" || true
 
 finding_count=$(wc -l < "$TEMP_FILE" | tr -d " ")
 

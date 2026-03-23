@@ -36,12 +36,18 @@ pyyaml:6.0.1:CVE-2020-14343:CRITICAL
 cryptography:41.0.4:CVE-2023-49083:HIGH
 setuptools:65.5.1:CVE-2022-40897:HIGH"
 
-# Simple version comparison (returns 0 if v1 < v2)
+# Simple version comparison (returns 0 if v1 < v2, returns 1 if v1 >= v2)
 version_lt() {
     local v1="$1" v2="$2"
-    [[ "$v1" != "$v2" ]] && [[ "$(printf '%s
-%s
-' "$v1" "$v2" | sort -V | head -n1)" == "$v1" ]]
+    # Normalize versions - extract only major.minor.patch
+    v1=$(echo "$v1" | grep -oE '^[0-9]+\.[0-9]+(\.[0-9]+)?' || echo "$v1")
+    v2=$(echo "$v2" | grep -oE '^[0-9]+\.[0-9]+(\.[0-9]+)?' || echo "$v2")
+    # If versions are equal, NOT vulnerable (already patched)
+    [[ "$v1" == "$v2" ]] && return 1
+    # Check if v1 sorts before v2 (v1 < v2)
+    local smaller
+    smaller=$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | head -n1)
+    [[ "$smaller" == "$v1" && "$v1" != "$v2" ]]
 }
 
 # Scan package.json
